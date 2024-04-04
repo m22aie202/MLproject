@@ -40,21 +40,21 @@ class MLP(nn.Module):
         return self.layers(x)
 
 class CNN(nn.Module):
-    def __init__(self):
+    def __init__(self, config):
         super(CNN, self).__init__()
         self.conv_layer = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(1, config['conv_channels'], kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2),
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(config['conv_channels'], config['conv_channels']*2, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2)
         )
         self.fc_layer = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(64 * 4 * 4, 64),
+            nn.Linear(config['conv_channels']*2 * 4 * 4, config['hidden_size']),
             nn.ReLU(),
-            nn.Linear(64, 10)
+            nn.Linear(config['hidden_size'], 10)
         )
 
     def forward(self, x):
@@ -65,11 +65,9 @@ class CNN(nn.Module):
 writer = SummaryWriter()
 
 mlp_model = MLP().to(device)
-cnn_model = CNN().to(device)
 
 criterion = nn.CrossEntropyLoss()
 mlp_optimizer = optim.Adam(mlp_model.parameters(), lr=0.001)
-cnn_optimizer = optim.Adam(cnn_model.parameters(), lr=0.001)
 
 def train(model, optimizer, criterion, train_loader, val_loader, epochs=10):
     for epoch in range(epochs):
@@ -114,20 +112,30 @@ def evaluate(model, dataloader):
     conf_matrix = confusion_matrix(y_true, y_pred)
     return acc, precision, recall, conf_matrix
 
-train(mlp_model, mlp_optimizer, criterion, train_loader, val_loader)
+cnn_configs = [
+        {'conv_channels': 32, 'hidden_size': 64},  # Configuration 1
+        {'conv_channels': 64, 'hidden_size': 128},  # Configuration 2
+        {'conv_channels': 128, 'hidden_size': 256}   # Configuration 3
+]
 
-train(cnn_model, cnn_optimizer, criterion, train_loader, val_loader)
+
+for i, cnn_config in enumerate(cnn_configs):
+    cnn_model = CNN(cnn_config).to(device)
+    cnn_optimizer = optim.Adam(cnn_model.parameters(), lr=0.001)
+    train(cnn_model, cnn_optimizer, criterion, train_loader, val_loader)                            
+    cnn_acc, cnn_precision, cnn_recall, cnn_conf_matrix = evaluate(cnn_model, test_loader)                                                        
+    writer.add_scalar(f'Accuracy/CNN_Config_{i+1}', cnn_acc)
+    fig_cnn = plot_confusion_matrix(cnn_conf_matrix, classes=range(10))
+    writer.add_figure(f'Confusion matrix/CNN_Config_{i+1}_test', fig_cnn)
+
+
+train(mlp_model, mlp_optimizer, criterion, train_loader, val_loader)
 
 mlp_acc, mlp_precision, mlp_recall, mlp_conf_matrix = evaluate(mlp_model, test_loader)
 
-cnn_acc, cnn_precision, cnn_recall, cnn_conf_matrix = evaluate(cnn_model, test_loader)
-
 writer.add_scalar('Accuracy/MLP', mlp_acc)
-writer.add_scalar('Accuracy/CNN', cnn_acc)
 writer.add_scalar('Precision/MLP', mlp_precision)
-writer.add_scalar('Precision/CNN', cnn_precision)
 writer.add_scalar('Recall/MLP', mlp_recall)
-writer.add_scalar('Recall/CNN', cnn_recall)
 
 def plot_confusion_matrix(cm, classes):
     plt.figure(figsize=(8, 6))
@@ -140,9 +148,7 @@ def plot_confusion_matrix(cm, classes):
 
 fig_mlp = plot_confusion_matrix(mlp_conf_matrix, classes=range(10))
 
-fig_cnn = plot_confusion_matrix(cnn_conf_matrix, classes=range(10))
 
 writer.add_figure('Confusion matrix/MLP_test', fig_mlp)
-writer.add_figure('Confusion matrix/CNN_test', fig_cnn)
 
 writer.close()
